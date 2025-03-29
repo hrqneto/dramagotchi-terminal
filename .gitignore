@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+save.json
+emocao_grafico.png
+.env
+venv/
