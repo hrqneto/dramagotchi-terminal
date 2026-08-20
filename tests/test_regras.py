@@ -1,8 +1,6 @@
-"""Testes da logica pura do jogo.
+"""Testes da logica pura: acao, decaimento, transicao de estado.
 
-Cobre regras: acao, decaimento, transicao de estado. A camada de
-input/render (rich, leitura de tecla crua) nao e testada aqui — jogo de
-terminal se valida jogando.
+A camada de input/render nao e coberta aqui; valida-se jogando.
 """
 import pytest
 
@@ -61,7 +59,7 @@ class TestDecaimento:
         assert r.ticks_decorridos(minutos * 60, 0)[0] == ticks
 
     def test_resto_do_periodo_nao_se_perde(self):
-        # 5 min = 1 tick + 2 min de sobra; o last_seen recua para guardar a sobra
+        # 5 min = 1 tick + 2 min de sobra, preservados no novo last_seen
         ticks, novo = r.ticks_decorridos(300, 0)
         assert ticks == 1 and novo == 180
 
@@ -69,7 +67,6 @@ class TestDecaimento:
         assert r.ticks_decorridos(0, 999)[0] == 0
 
     def test_menu_nao_consome_tick(self):
-        # mesma marca de tempo: abrir menu nao decai
         assert r.ticks_decorridos(500, 500)[0] == 0
 
 
@@ -97,7 +94,7 @@ class TestVidaECrise:
         assert (hits, morreu, avisou) == (3, True, False)
 
     def test_duas_chances_antes_do_fim(self):
-        """O bug: morria sem nunca passar pelos avisos."""
+        """Dois avisos precisam sair antes da morte."""
         s = h = e = 5
         hits, avisos, morreu = 0, 0, False
         for _ in range(40):
@@ -150,12 +147,12 @@ class TestEstado:
         (10, "green"), (7, "green"), (6, "yellow"), (4, "yellow"), (3, "red"), (0, "red"),
     ])
     def test_cor_cheio_e_bom(self, valor, cor):
-        """As tres barras seguem a mesma logica: cheio = bom."""
+        """Cheio = bom, igual nas tres barras."""
         assert r.faixa_de_cor(valor) == cor
 
 
 class TestBalanceamento:
-    """O jogo tem que ser vencivel com atencao e punir abandono."""
+    """Vencivel com atencao, fatal no abandono."""
 
     def _jogar(self, personality, resultados):
         s = h = e = 5

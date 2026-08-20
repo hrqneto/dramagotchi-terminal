@@ -1,15 +1,13 @@
-"""Regras do jogo, sem nenhum I/O.
+"""Regras do jogo, sem I/O.
 
-Tudo aqui e funcao pura: recebe valores, devolve valores. Nada de rich,
-input, arquivo ou relogio — o tempo entra como parametro. E esta camada
-que os testes automatizados cobrem; input e render se validam jogando.
+Funcoes puras: o tempo entra como parametro, nada de rich, input ou disco.
 """
 
 MAX = 10
 MINUTOS_POR_TICK = 3
 
-# Ganho de felicidade por resultado do minigame. Calibrado para o jogo
-# seguir sustentavel mesmo perdendo sempre, com vantagem clara para quem ganha.
+# Minimo 4: abaixo disso, perder sempre torna o jogo insustentavel para as
+# personalidades sem bonus de felicidade.
 GANHO_MINIGAME = {"ganhou": 7, "empate": 5, "perdeu": 4}
 
 VENCE = {"pedra": "tesoura", "papel": "pedra", "tesoura": "papel"}
@@ -21,17 +19,14 @@ def limitar(valor):
 
 
 def aplicar_feed(satiety):
-    """Alimentar enche a saciedade. Devolve (nova_satiety, alimentou?)."""
+    """Devolve (nova_satiety, alimentou?)."""
     if satiety >= MAX:
         return satiety, False
     return limitar(satiety + 4), True
 
 
 def aplicar_play(happiness, energy, personality, resultado):
-    """Brincar troca energia por felicidade, conforme o resultado do jogo.
-
-    Devolve (nova_happiness, nova_energy, ganho). Sem energia, nada muda.
-    """
+    """Troca energia por felicidade. Sem energia, nada muda."""
     if energy <= 0:
         return happiness, energy, 0
     ganho = GANHO_MINIGAME[resultado]
@@ -41,7 +36,7 @@ def aplicar_play(happiness, energy, personality, resultado):
 
 
 def aplicar_sleep(energy, satiety, personality):
-    """Dormir recupera energia e da fome. Devolve (energia, saciedade)."""
+    """Recupera energia ao custo de saciedade. Devolve (energia, saciedade)."""
     bonus = 6 if personality == "carente" else 5
     return limitar(energy + bonus), limitar(satiety - 2)
 
@@ -52,11 +47,7 @@ def aplicar_tick(satiety, happiness, energy):
 
 
 def ticks_decorridos(agora, last_seen, minutos_por_tick=MINUTOS_POR_TICK):
-    """Quantos ticks cabem no tempo passado, e o novo last_seen.
-
-    O resto do periodo fica para a proxima chamada, para nao perder fracoes
-    de minuto entre interacoes.
-    """
+    """Ticks cabidos no tempo passado e o novo last_seen, guardando o resto."""
     decorrido = max(0.0, agora - last_seen)
     periodo = minutos_por_tick * 60
     ticks = int(decorrido // periodo)
@@ -85,8 +76,8 @@ def em_estado_critico(satiety, happiness, energy):
 def resolver_crise(satiety, happiness, energy, critical_hits):
     """Escudo de duas chances antes do fim.
 
-    Devolve (satiety, happiness, energy, hits, morreu, avisou). Ao bater no
-    fundo gasta uma chance e devolve 1 ponto de folga; na terceira, morre.
+    Devolve (satiety, happiness, energy, hits, morreu, avisou). No fundo,
+    gasta uma chance e devolve 1 ponto de folga; na terceira, morre.
     """
     if not no_fundo(satiety, happiness, energy):
         return satiety, happiness, energy, critical_hits, False, False
@@ -133,7 +124,7 @@ def humor_para_pose(satiety, happiness, energy):
 
 
 def faixa_de_cor(valor):
-    """Cor da barra: cheio = bom, em todos os status."""
+    """Cor da barra. Cheio = bom em todos os status."""
     if valor >= 7:
         return "green"
     if valor >= 4:

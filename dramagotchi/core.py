@@ -1,5 +1,3 @@
-# tamagotchi/core.py
-
 import random
 import json
 import time
@@ -24,16 +22,14 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
 
 
 def _get_client():
-    """Cria o client da OpenAI sob demanda.
+    """Cria o client sob demanda, ou None se nao houver chave.
 
-    O construtor levanta OpenAIError quando OPENAI_API_KEY não está definida,
-    entao ele nao pode rodar no import: o jogo precisa funcionar sem chave,
-    caindo nas falas de fallback.
+    Nao pode rodar no import: o construtor levanta OpenAIError sem
+    OPENAI_API_KEY, e o jogo precisa abrir sem chave.
     """
     if _get_client.cached is None:
         try:
-            # base_url permite apontar para um servidor local (Ollama etc);
-            # timeout curto para o jogo nao travar esperando o modelo.
+            # base_url aponta para um servidor local (Ollama) quando definida.
             _get_client.cached = OpenAI(
                 base_url=os.getenv("OPENAI_BASE_URL") or None,
                 api_key=os.getenv("OPENAI_API_KEY"),
@@ -98,14 +94,12 @@ class Dramagotchi:
     def load():
         with open("data/save.json") as f:
             data = json.load(f)
-        # Saves antigos guardavam "hunger" (alto = ruim). Converte para
-        # saciedade (alto = bom) para nao perder o bichinho na migracao.
+        # Saves antigos guardam "hunger", a escala invertida de satiety.
         if "hunger" in data and "satiety" not in data:
             data["satiety"] = 10 - data.pop("hunger")
         return Dramagotchi(data['name'], data)
 
     def status(self, mensagem=None):
-        """Desenha o quadro parado, o mesmo que animate() deixa na tela."""
         pendente = self.memory.pop("aviso_pendente", None)
         if pendente:
             mensagem = f"[bold red]{pendente}[/bold red]"
@@ -124,7 +118,6 @@ class Dramagotchi:
         console.print(f"[bold green]{self.name} diz:[/bold green] {emoji} {fala}")
 
     def talk(self):
-        """Conversa sem sair do Layout: pergunta e resposta no palco."""
         if self.memory["conversations"] >= 3:
             animate(self, "idle", dim=True,
                     mensagem=f"{escape(self.name)}: Chega de papo, quero fazer outra coisa! 😅")
@@ -134,7 +127,6 @@ class Dramagotchi:
         if not pergunta:
             return
 
-        # Enquanto o modelo responde, o quadro segue de pe com um aviso.
         TELA.desenhar(render(self, "ocioso", mensagem="[dim]💬 pensando...[/dim]"))
         estado, _ = self.emotion()
         prompt = (
@@ -154,7 +146,7 @@ class Dramagotchi:
         mostrar_palco(self, palco, segundos=3.0)
 
     def _final_drama(self):
-        """Estado critico maximo: leva direto ao desfecho, sem resgate."""
+        """Estado critico maximo: leva direto ao desfecho."""
         self.memory["drama_triggered"] = True
         animate(self, "drama", delay=0.3,
                 mensagem="[bold red]😭 Você me deixou chegar no estado crítico máximo...[/bold red]")
@@ -173,7 +165,6 @@ class Dramagotchi:
         animate(self, "feed", mensagem=msg)
 
     def play(self):
-        """Brincar e um minigame: o ganho de felicidade depende do resultado."""
         if self.energy <= 0:
             animate(self, "idle",
                     mensagem=f"{escape(self.name)} está muito cansado para brincar. 😓", dim=True)
@@ -210,7 +201,6 @@ class Dramagotchi:
                 mensagem=msg)
 
     def sleep(self):
-        # Dormir recupera energia, mas da fome: nao da pra so dormir.
         self.energy, self.satiety = regras.aplicar_sleep(
             self.energy, self.satiety, self.personality
         )
@@ -220,14 +210,13 @@ class Dramagotchi:
     def idle(self):
         animate(self, "idle", dim=True)
 
-    # Um "tick" de decaimento a cada MINUTOS_POR_TICK minutos de tempo real.
     MINUTOS_POR_TICK = regras.MINUTOS_POR_TICK
 
     def decay(self):
         """Aplica o decaimento acumulado desde a ultima interacao.
 
-        O tempo e que passa, nao as escolhas de menu: abrir o grafico ou
-        conversar nao custa mais nada. Devolve quantos ticks passaram.
+        Devolve quantos ticks passaram. O relogio e que decai, nao as
+        escolhas de menu.
         """
         agora = time.time()
         ticks, novo = regras.ticks_decorridos(
@@ -247,16 +236,13 @@ class Dramagotchi:
         return ticks
 
     def tocar(self):
-        """Marca interacao sem aplicar decaimento (usado apos uma acao)."""
         self.last_seen = time.time()
 
     def _checar_crise(self):
         """Escudo de duas chances antes do fim.
 
-        Antes isso vivia no status(), entao um decaimento que zerasse os
-        status encerrava o loop sem nunca mostrar o aviso. Agora roda junto
-        do decaimento: ao bater no fundo, gasta uma chance e devolve um
-        minimo de folga; so na terceira vez o bichinho se vai.
+        Roda junto do decaimento, nao no render: um tick que zere os status
+        precisa gastar a chance antes de o loop testar is_alive().
         """
         if not regras.no_fundo(self.satiety, self.happiness, self.energy):
             if not regras.em_estado_critico(self.satiety, self.happiness, self.energy):
@@ -282,8 +268,6 @@ class Dramagotchi:
             )
 
     def is_alive(self):
-        # O escudo de crises segura as duas primeiras quedas ao fundo; so
-        # depois de drama_triggered o bichinho realmente morre.
         return regras.esta_vivo(self.satiety, self.happiness, self.energy,
                                 self.memory.get("drama_triggered", False))
 

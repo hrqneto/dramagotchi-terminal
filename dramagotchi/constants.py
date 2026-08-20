@@ -20,9 +20,8 @@ FALLBACK_DIALOG = {
 
 PET_ASCII = '     (\\___/)\n    ( o^_^o )\n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^'
 
-# Cada pose e um boneco inteiro, com a mesma altura de PET_ASCII (5 linhas).
-# O render troca a pose no lugar, entao as alturas precisam bater: se uma
-# pose tiver mais ou menos linhas, o resto da tela pula durante a animacao.
+# Toda pose precisa ter a mesma altura de PET_ASCII: o render troca a pose
+# no lugar, e alturas diferentes deslocam o resto da tela.
 POSES = {
     'chorando': '     (\\___/)\n    ( T_T )  \n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^',
     'comendo': '     (\\___/)\n    ( >o_o< ) 🍔\n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^',
@@ -34,7 +33,6 @@ POSES = {
     'vitoria': '     (\\___/)\n    ( ^o^ )/ !!\n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^',
 }
 
-# Sequencias de poses: o render alterna entre elas no lugar do boneco.
 ANIMACOES = {
     "feed": ["ocioso", "comendo", "ocioso", "comendo", "feliz", "comendo",
              "ocioso", "comendo", "feliz", "feliz"],
@@ -47,18 +45,15 @@ ANIMACOES = {
     "idle": ["ocioso", "feliz", "ocioso", "feliz", "ocioso", "feliz", "ocioso"],
 }
 
-# Pose exibida no estado parado, conforme o humor. O boneco reage ao estado
-# do bichinho mesmo sem acao nenhuma.
 POSE_POR_HUMOR = {
     "critico": "chorando",
     "faminto": "comendo",
     "cansado": "dormindo",
     "triste": "chorando",
     "feliz": "feliz",
-    "neutro": None,   # None = PET_ASCII, a cara neutra
+    "neutro": None,   # None = PET_ASCII
 }
 
-# Sequencia do minigame de brincar.
 ANIMACOES["correr"] = ["ocioso", "correndo", "ocioso", "correndo", "ocioso",
                        "correndo", "ocioso", "correndo"]
 ANIMACOES["ganhou"] = ["vitoria", "feliz", "vitoria", "feliz", "vitoria",

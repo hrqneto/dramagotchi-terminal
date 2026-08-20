@@ -27,12 +27,7 @@ def bar(value, total=10):
 
 
 def limpar_stdin():
-    """Descarta o que foi digitado durante a animacao.
-
-    Sem isso, Enters batidos enquanto o boneco anima ficam no buffer e viram
-    uma rajada de "Opcao invalida" assim que o input abre. Silencioso quando
-    nao ha terminal (pipe, teste, CI), onde tcflush nao se aplica.
-    """
+    """Descarta teclas digitadas durante a animacao. Sem efeito fora de um tty."""
     try:
         import termios
         sys.stdin.fileno()
@@ -43,7 +38,7 @@ def limpar_stdin():
 
 
 def pose_do_humor(pet):
-    """Pose do estado parado, derivada do humor atual."""
+    """Pose do estado parado, derivada do humor."""
     humor = regras.humor_para_pose(pet.satiety, pet.happiness, pet.energy)
     return POSE_POR_HUMOR.get(humor)
 
@@ -70,7 +65,7 @@ LARGURA_MIN, ALTURA_MIN = 72, 20
 
 
 def checar_terminal():
-    """Avisa se a janela e menor que o layout precisa."""
+    """Avisa se a janela e menor que o minimo. Devolve se cabe."""
     larg, alt = console.size
     if larg < LARGURA_MIN or alt < ALTURA_MIN:
         console.print(
@@ -86,11 +81,7 @@ SPARK = "▁▂▃▄▅▆▇█"
 
 
 def sparkline(emocoes, largura=16):
-    """Mini-grafico do humor recente, para caber no canto da tela.
-
-    Mapeia cada emocao registrada para uma altura: quanto pior o estado,
-    mais baixa a barra.
-    """
+    """Mini-grafico do humor recente: quanto pior o estado, mais baixa a barra."""
     if not emocoes:
         return "[dim]sem histórico ainda[/dim]"
     peso = {"neutro": 7, "faminto": 3, "triste": 2, "cansado": 4}
@@ -122,11 +113,7 @@ def _painel_status(pet):
 
 
 def _painel_menu(prompt=None):
-    """Menu + linha de prompt, ambos dentro do layout.
-
-    O prompt precisa morar aqui: impresso por fora, ele empurrava o layout
-    para cima e cortava o header.
-    """
+    """Menu + prompt. O prompt vive no layout; impresso por fora, rola a tela."""
     linhas = [
         Columns([Text.from_markup(o) for o in OPCOES],
                 equal=True, expand=True, padding=(0, 1)),
@@ -137,12 +124,7 @@ def _painel_menu(prompt=None):
 
 
 def render(pet, pose=None, mensagem=None, dim=False, palco=None, prompt=None):
-    """Monta a tela inteira com Layout.
-
-    Bichinho grande no centro (o palco, onde as interacoes acontecem),
-    status na coluna lateral, sparkline no canto superior direito e menu
-    fixo no rodape. `palco` substitui o boneco durante um minigame.
-    """
+    """Monta a tela inteira. `palco` substitui o boneco durante um minigame."""
     if pose is None and not dim:
         pose = pose_do_humor(pet)
     arte = POSES.get(pose, PET_ASCII) if pose else PET_ASCII
@@ -164,8 +146,6 @@ def render(pet, pose=None, mensagem=None, dim=False, palco=None, prompt=None):
 
     centro = palco if palco is not None else Text(arte, style=estilo)
     aviso = Text.from_markup(mensagem) if mensagem else Text("")
-    # Align externo centraliza o conjunto (boneco + aviso) no palco inteiro,
-    # em vez de gruda-lo no topo.
     layout["palco"].update(
         Panel(
             Align.center(
@@ -186,10 +166,10 @@ def render(pet, pose=None, mensagem=None, dim=False, palco=None, prompt=None):
 
 
 class Tela:
-    """Sessao Live no buffer alternativo (screen=True).
+    """Sessao Live no buffer alternativo.
 
-    Uma unica Live segura a tela inteira: nada e impresso por fora, entao o
-    layout cabe exatamente na janela e o header nao e cortado por rolagem.
+    Uma unica Live para a sessao inteira: imprimir por fora dela rola a
+    tela e corta o header.
     """
 
     def __init__(self):
@@ -217,11 +197,10 @@ class Tela:
             self.live.update(renderable, refresh=True)
 
     def _ler_linha(self, pet, prompt, mensagem, echo):
-        """Le uma linha lendo tecla a tecla, sem parar o Live.
+        """Le uma linha tecla a tecla, sem parar o Live.
 
-        Parar a Live para usar input() faria o terminal sair e reentrar no
-        buffer alternativo a cada pergunta, redesenhando o layout no buffer
-        normal e empilhando telas. Aqui o buffer alternativo nunca e deixado.
+        Parar a Live para usar input() sai e reentra no buffer alternativo
+        a cada pergunta, empilhando telas.
         """
         import termios, tty as _tty
 
@@ -236,8 +215,7 @@ class Tela:
                     pet, mensagem=mensagem,
                     prompt=f"{prompt}\n > {escape(buf) if echo else '*' * len(buf)}",
                 ))
-                # os.read no descritor cru: sys.stdin.read(1) fica preso no
-                # buffer interno do Python e nao retorna tecla a tecla.
+                # sys.stdin.read(1) bufferiza e nao retorna tecla a tecla.
                 try:
                     b = os.read(fd, 1)
                 except OSError:
@@ -263,7 +241,6 @@ class Tela:
     def perguntar(self, pet, prompt, mensagem=None, echo=True):
         """Mostra o quadro com o prompt no rodape e le a resposta."""
         if self.live is None or not sys.stdin.isatty():
-            # Sem terminal (pipe, teste, CI): cai no input() simples.
             self.desenhar(render(pet, mensagem=mensagem, prompt=prompt))
             limpar_stdin()
             try:
@@ -277,27 +254,18 @@ TELA = Tela()
 
 
 def animate(pet, chave, delay=0.35, mensagem=None, dim=False, palco=None):
-    """Anima o boneco no lugar e so entao mostra a mensagem.
-
-    O efeito ja foi aplicado pelo chamador; aqui a animacao roda inteira com
-    o quadro limpo e a mensagem entra no ultimo frame, para o texto nunca
-    aparecer antes do movimento terminar.
-    """
+    """Anima o boneco no lugar; a mensagem so entra no ultimo frame."""
     poses = ANIMACOES.get(chave, ["ocioso"])
     for pose in poses:
         TELA.desenhar(render(pet, pose, None, dim, palco))
         time.sleep(delay)
-    # Ultimo quadro: pose de repouso + a mensagem de resultado.
     TELA.desenhar(render(pet, None, mensagem, dim, palco))
     if mensagem:
         time.sleep(0.9)
 
 
 def emotion_chart(emotions, name):
-    """Gera o PNG e devolve o caminho, ou None se nao houver dados.
-
-    Nao imprime nada: quem chama mostra o resultado dentro do layout.
-    """
+    """Gera o PNG e devolve o caminho, ou None se nao houver dados."""
     if not emotions:
         return None
     data = Counter(emotions)
@@ -339,10 +307,7 @@ JOKENPO = {
 
 
 def minigame_jokenpo(pet, escolha_jogador):
-    """Pedra-papel-tesoura no palco. Devolve (resultado, painel_do_palco).
-
-    resultado: 'ganhou' | 'perdeu' | 'empate'
-    """
+    """Pedra-papel-tesoura no palco. Devolve (resultado, painel_do_palco)."""
     escolha_pet = random.choice(list(JOKENPO))
     resultado = regras.jogar_jokenpo(escolha_jogador, escolha_pet)
 
@@ -366,6 +331,6 @@ def minigame_jokenpo(pet, escolha_jogador):
 
 
 def mostrar_palco(pet, palco, segundos=1.8):
-    """Desenha o quadro com um palco customizado e segura na tela."""
+    """Desenha um palco customizado e segura na tela."""
     TELA.desenhar(render(pet, palco=palco))
     time.sleep(segundos)

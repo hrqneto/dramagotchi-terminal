@@ -7,7 +7,6 @@ def main():
     if not checar_terminal():
         input("\n[enter] para continuar mesmo assim, ctrl-c para sair")
 
-    # Tenta carregar ou criar novo Dramagotchi
     if os.path.exists("data/save.json"):
         pet = Dramagotchi.load()
     else:
@@ -15,11 +14,8 @@ def main():
         pet = Dramagotchi(nome)
 
     aviso = None
-    # Uma unica sessao Live no buffer alternativo: o layout ocupa a janela
-    # inteira e nada e impresso por fora dele.
     with TELA:
         while pet.is_alive():
-            # O decaimento vem do relogio, nao das escolhas.
             pet.decay()
             if not pet.is_alive():
                 break
@@ -40,7 +36,6 @@ def main():
                 continue
             elif choice in acoes:
                 acoes[choice]()
-                # Cuidar do bichinho conta como interacao: reinicia o relogio.
                 pet.tocar()
                 pet.save()
             else:
