@@ -23,6 +23,7 @@ PET_ASCII = '     (\\___/)\n    ( o^_^o )\n   /|       |\\\n  / |       | \\\n  
 # Toda pose precisa ter a mesma altura de PET_ASCII: o render troca a pose
 # no lugar, e alturas diferentes deslocam o resto da tela.
 POSES = {
+    'faminto': '     (\\___/)\n    ( o.o )  ~🍽\n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^',
     'chorando': '     (\\___/)\n    ( T_T )  \n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^',
     'comendo': '     (\\___/)\n    ( >o_o< ) 🍔\n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^',
     'correndo': '     (\\___/)\n    ( >o_o )>  \n   /|       |\\\n  / |       | \\\n    |       |\n   /_|_____|_\\\n     ^^   ^^',
@@ -47,7 +48,7 @@ ANIMACOES = {
 
 POSE_POR_HUMOR = {
     "critico": "chorando",
-    "faminto": "comendo",
+    "faminto": "faminto",
     "cansado": "dormindo",
     "triste": "chorando",
     "feliz": "feliz",
