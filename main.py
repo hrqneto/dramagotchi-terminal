@@ -1,5 +1,6 @@
 from dramagotchi.core import Dramagotchi
 from dramagotchi.utils import TELA, checar_terminal
+from rich.markup import escape
 import os
 
 
@@ -23,6 +24,11 @@ def main():
             pendente = pet.memory.pop("aviso_pendente", None)
             if pendente:
                 aviso = f"[bold red]{pendente}[/bold red]"
+
+            if aviso is None:
+                fala = pet.falar_sozinho()
+                if fala:
+                    aviso = f"[green]{escape(pet.name)}:[/green] 💬 {escape(fala)}"
 
             choice = TELA.perguntar(pet, "[bold]Escolha uma opção:[/bold]", aviso)
             aviso = None

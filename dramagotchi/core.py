@@ -1,5 +1,6 @@
 import random
 import json
+import threading
 import time
 from openai import OpenAI, OpenAIError
 import os
@@ -57,6 +58,23 @@ def _ask(prompt):
     except (OpenAIError, OSError):
         return None
 
+def _ask_async(prompt, espera):
+    """Resposta do modelo dentro de `espera` segundos, ou None.
+
+    A thread fica orfa se estourar o prazo: o jogo nao pode parar esperando
+    um modelo local lento.
+    """
+    resultado = {}
+
+    def alvo():
+        resultado["r"] = _ask(prompt)
+
+    t = threading.Thread(target=alvo, daemon=True)
+    t.start()
+    t.join(espera)
+    return resultado.get("r")
+
+
 class Dramagotchi:
     def __init__(self, name, data=None):
         self.name = name
@@ -75,8 +93,12 @@ class Dramagotchi:
             "crisis_count": 0,
             "critical_hits": 0,
             "drama_triggered": False,
-            "in_critical": False
+            "in_critical": False,
+            "ultima_acao": None,
         }
+        self.ultima_fala = None
+        self.ocioso_desde = time.time()
+        self._foto = None
         if data:
             self.__dict__.update(data)
             for k in self.memory:
@@ -145,6 +167,25 @@ class Dramagotchi:
         )
         mostrar_palco(self, palco, segundos=3.0)
 
+    def falar_sozinho(self, espera=2.5):
+        """Fala espontanea, se houver motivo. Devolve a frase ou None."""
+        agora = time.time()
+        foto = regras.instantaneo(self.satiety, self.happiness, self.energy)
+        eventos = regras.transicoes(self._foto, foto)
+        self._foto = foto
+
+        motivo = regras.deve_falar(agora, self.ultima_fala, eventos, self.ocioso_desde)
+        if motivo is None:
+            return None
+
+        self.ultima_fala = agora
+        prompt = regras.montar_prompt_fala(
+            self.name, self.personality, self.satiety, self.happiness,
+            self.energy, motivo, self.memory.get("ultima_acao"),
+        )
+        fala = _ask_async(prompt, espera) or get_fallback_phrase(self.personality)
+        return fala.strip()
+
     def _final_drama(self):
         """Estado critico maximo: leva direto ao desfecho."""
         self.memory["drama_triggered"] = True
@@ -159,6 +200,7 @@ class Dramagotchi:
         self.satiety, comeu = regras.aplicar_feed(self.satiety)
         if comeu:
             self.memory["feed"] += 1
+            self.memory["ultima_acao"] = "alimentar"
             msg = f"{escape(self.name)} foi alimentado. 🍖"
         else:
             msg = f"{escape(self.name)} já está satisfeito! 🙂"
@@ -188,6 +230,7 @@ class Dramagotchi:
             self.happiness, self.energy, self.personality, resultado
         )
         self.memory["play"] += 1
+        self.memory["ultima_acao"] = "brincar"
         self.memory.setdefault("wins", 0)
         if resultado == "ganhou":
             self.memory["wins"] += 1
@@ -205,6 +248,7 @@ class Dramagotchi:
             self.energy, self.satiety, self.personality
         )
         self.memory["sleep"] += 1
+        self.memory["ultima_acao"] = "dormir"
         animate(self, "sleep", mensagem=f"{escape(self.name)} tirou um cochilo. 🛌")
 
     def idle(self):
@@ -237,6 +281,7 @@ class Dramagotchi:
 
     def tocar(self):
         self.last_seen = time.time()
+        self.ocioso_desde = time.time()
 
     def _checar_crise(self):
         """Escudo de duas chances antes do fim.

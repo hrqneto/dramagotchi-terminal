@@ -184,3 +184,60 @@ class TestBalanceamento:
                 assert turno < 20, "abandono deveria matar rapido"
                 return
         pytest.fail("abandono nao matou")
+
+
+class TestFalaEspontanea:
+    def _foto(self, s=6, h=6, e=6):
+        return r.instantaneo(s, h, e)
+
+    def test_sem_foto_anterior_nao_ha_transicao(self):
+        assert r.transicoes(None, self._foto()) == []
+
+    def test_estado_estavel_nao_gera_evento(self):
+        assert r.transicoes(self._foto(), self._foto()) == []
+
+    @pytest.mark.parametrize("antes,depois,evento", [
+        ((6, 6, 6), (6, 1, 6), "entrou_critico"),
+        ((6, 1, 6), (6, 6, 6), "saiu_critico"),
+        ((6, 6, 6), (2, 6, 6), "ficou_faminto"),
+        ((6, 6, 3), (6, 6, 9), "acordou"),
+        ((6, 5, 6), (6, 9, 6), "ficou_feliz"),
+    ])
+    def test_transicoes(self, antes, depois, evento):
+        assert evento in r.transicoes(self._foto(*antes), self._foto(*depois))
+
+    def test_so_dispara_em_transicao(self):
+        """Estado ruim parado nao fala de novo a cada turno."""
+        foto = self._foto(2, 2, 2)
+        assert r.deve_falar(1000, None, r.transicoes(foto, foto)) is None
+
+    def test_cooldown_bloqueia(self):
+        assert r.deve_falar(1000, 990, ["ficou_faminto"], cooldown=90) is None
+
+    def test_fala_depois_do_cooldown(self):
+        assert r.deve_falar(1100, 1000, ["ficou_faminto"], cooldown=90) == "ficou_faminto"
+
+    def test_primeira_fala_nao_espera_cooldown(self):
+        assert r.deve_falar(10, None, ["ficou_faminto"]) == "ficou_faminto"
+
+    def test_ocioso_dispara_sem_evento(self):
+        assert r.deve_falar(1000, None, [], ocioso_desde=0, limite_ocioso=300) == "ocioso"
+
+    def test_ocioso_curto_nao_dispara(self):
+        assert r.deve_falar(100, None, [], ocioso_desde=0, limite_ocioso=300) is None
+
+    def test_evento_tem_prioridade_sobre_ocioso(self):
+        assert r.deve_falar(1000, None, ["entrou_critico"], ocioso_desde=0) == "entrou_critico"
+
+    def test_critico_vem_antes_de_fome(self):
+        eventos = r.transicoes(self._foto(6, 6, 6), self._foto(1, 1, 1))
+        assert eventos[0] == "entrou_critico"
+
+    def test_prompt_carrega_contexto(self):
+        p = r.montar_prompt_fala("Kiki", "carente", 2, 9, 4, "ficou_faminto", "brincar")
+        for esperado in ["Kiki", "carente", "2/10", "9/10", "4/10", "brincar"]:
+            assert esperado in p
+
+    def test_prompt_sem_ultima_acao(self):
+        p = r.montar_prompt_fala("Kiki", "carente", 5, 5, 5, "ocioso")
+        assert "ultima coisa" not in p
