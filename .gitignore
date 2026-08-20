@@ -4,3 +4,4 @@ save.json
 emocao_grafico.png
 .env
 venv/
+.venv/
