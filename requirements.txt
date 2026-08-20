@@ -16,6 +16,7 @@ matplotlib==3.10.1
 mdurl==0.1.2
 numpy==2.2.4
 openai==1.69.0
+python-dotenv==1.0.1
 packaging==24.2
 pillow==11.1.0
 pydantic==2.11.0

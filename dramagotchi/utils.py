@@ -1,8 +1,10 @@
+import random
 import time
 from collections import Counter
 from rich.console import Console
+import os
 import matplotlib.pyplot as plt
-from dramagotchi.constants import EMOJIS
+from dramagotchi.constants import EMOJIS, FALLBACK_DIALOG
 
 console = Console()
 
@@ -26,6 +28,7 @@ def emotion_chart(emotions, name):
     plt.ylabel("Frequência")
     plt.xlabel("Emoções")
     plt.tight_layout()
+    os.makedirs("assets", exist_ok=True)
     plt.savefig("assets/emocao_grafico.png")
     console.print("[bold green]Gráfico salvo como 'assets/emocao_grafico.png'![/bold green]")
 
@@ -46,7 +49,6 @@ def generate_prompt(name, personality, estado, history):
     return f"O Dramagotchi {name} é {personality}. Hoje ele está {estado}. Ontem ele estava {ontem}. Diga o que ele falaria, de forma emocional e divertida:"
 
 def get_fallback_phrase(personality):
-    from dramagotchi.constants import FALLBACK_DIALOG
     return random.choice(FALLBACK_DIALOG.get(personality, ["Hoje tá difícil 😔"]))
 
 def summarize_emotions(name, memory):

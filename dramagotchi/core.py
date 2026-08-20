@@ -3,7 +3,7 @@
 import random
 import json
 import time
-import openai
+from openai import OpenAI, OpenAIError
 import os
 from dotenv import load_dotenv
 from rich.console import Console
@@ -14,7 +14,41 @@ from dramagotchi.utils import bar, animate, emotion_chart, get_emotion_state, ge
 
 console = Console()
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+
+MODEL = "gpt-3.5-turbo"
+
+
+def _get_client():
+    """Cria o client da OpenAI sob demanda.
+
+    O construtor levanta OpenAIError quando OPENAI_API_KEY não está definida,
+    entao ele nao pode rodar no import: o jogo precisa funcionar sem chave,
+    caindo nas falas de fallback.
+    """
+    if _get_client.cached is None:
+        try:
+            _get_client.cached = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        except OpenAIError:
+            return None
+    return _get_client.cached
+
+
+_get_client.cached = None
+
+
+def _ask(prompt):
+    """Devolve a resposta do modelo, ou None se a API não estiver disponível."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        res = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return res.choices[0].message.content
+    except OpenAIError:
+        return None
 
 class Dramagotchi:
     def __init__(self, name, data=None):
@@ -84,13 +118,8 @@ class Dramagotchi:
         estado, emoji = self.emotion()
         self.memory["emotions"].append(estado)
         context = generate_prompt(self.name, self.personality, estado, self.memory["emotions"])
-        try:
-            res = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": context}]
-            )
-            fala = res["choices"][0]["message"]["content"]
-        except Exception:
+        fala = _ask(context)
+        if fala is None:
             fala = get_fallback_phrase(self.personality)
         console.print(f"[bold green]{self.name} diz:[/bold green] {emoji} {fala}")
 
@@ -101,15 +130,10 @@ class Dramagotchi:
         pergunta = input("Você: ")
         estado, _ = self.emotion()
         prompt = f"Seu dono disse: '{pergunta}'. Você está {estado} e é um tamagotchi {self.personality}. Responda de acordo com seu humor:"
-        try:
-            res = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            resposta = res["choices"][0]["message"]["content"]
-            console.print(f"[bold green]{self.name} diz:[/bold green] 💬 {resposta}")
-        except:
-            console.print(f"[bold green]{self.name} diz:[/bold green] 💬 Vamos conversar mais tarde? 🛌")
+        resposta = _ask(prompt)
+        if resposta is None:
+            resposta = "Vamos conversar mais tarde? 🛌"
+        console.print(f"[bold green]{self.name} diz:[/bold green] 💬 {resposta}")
         self.memory["conversations"] += 1
 
     def _final_drama(self):
