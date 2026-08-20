@@ -5,3 +5,5 @@ emocao_grafico.png
 .env
 venv/
 .venv/
+CLAUDE.md
+.claude/
