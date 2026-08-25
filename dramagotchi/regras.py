@@ -10,6 +10,18 @@ MINUTOS_POR_TICK = 3
 # personalidades sem bonus de felicidade.
 GANHO_MINIGAME = {"ganhou": 7, "empate": 5, "perdeu": 4}
 
+# Bonus por assistir a cutscene inteira. E bonus, nao desconto: pular rende o
+# mesmo de sempre. Descontar abaixo do ganho normal quebra a economia -- ela
+# ja fecha com pouca folga sobre o decaimento, e quem pulasse ficaria preso
+# em comer e dormir ate a felicidade zerar.
+BONUS_CUTSCENE = 1
+
+
+def bonus_por_progresso(progresso, bonus=BONUS_CUTSCENE):
+    """Bonus proporcional a fracao da cutscene assistida."""
+    return round(bonus * max(0.0, min(1.0, progresso)))
+
+
 VENCE = {"pedra": "tesoura", "papel": "pedra", "tesoura": "papel"}
 
 
@@ -25,19 +37,29 @@ def aplicar_feed(satiety):
     return limitar(satiety + 4), True
 
 
-def aplicar_play(happiness, energy, personality, resultado):
-    """Troca energia por felicidade. Sem energia, nada muda."""
+def aplicar_play(happiness, energy, personality, resultado, progresso=0.0):
+    """Troca energia por felicidade. Sem energia, nada muda.
+
+    `progresso` e a fracao da cutscene assistida: assistir soma um bonus,
+    pular rende o ganho normal.
+    """
     if energy <= 0:
         return happiness, energy, 0
     ganho = GANHO_MINIGAME[resultado]
     if personality == "brincalhão":
         ganho += 1
+    ganho += bonus_por_progresso(progresso)
     return limitar(happiness + ganho), limitar(energy - 2), ganho
 
 
-def aplicar_sleep(energy, satiety, personality):
-    """Recupera energia ao custo de saciedade. Devolve (energia, saciedade)."""
+def aplicar_sleep(energy, satiety, personality, progresso=0.0):
+    """Recupera energia ao custo de saciedade. Devolve (energia, saciedade).
+
+    `progresso` e a fracao da cutscene assistida: o sono inteiro rende um
+    bonus; o custo de saciedade nao muda.
+    """
     bonus = 6 if personality == "carente" else 5
+    bonus += bonus_por_progresso(progresso)
     return limitar(energy + bonus), limitar(satiety - 2)
 
 
@@ -130,3 +152,71 @@ def faixa_de_cor(valor):
     if valor >= 4:
         return "yellow"
     return "red"
+
+
+COOLDOWN_FALA = 90          # segundos entre falas espontaneas
+OCIOSO_PARA_FALAR = 5 * 60  # silencio que ja e motivo de fala
+
+
+def instantaneo(satiety, happiness, energy):
+    """Fotografia do estado, para comparar entre turnos."""
+    return {
+        "faminto": satiety <= 3,
+        "critico": em_estado_critico(satiety, happiness, energy),
+        "cansado": energy <= 4,
+        "feliz": happiness >= 8,
+    }
+
+
+def transicoes(antes, depois):
+    """Gatilhos entre duas fotografias, do mais urgente para o menos."""
+    if antes is None:
+        return []
+    eventos = []
+    if not antes["critico"] and depois["critico"]:
+        eventos.append("entrou_critico")
+    if antes["critico"] and not depois["critico"]:
+        eventos.append("saiu_critico")
+    if not antes["faminto"] and depois["faminto"]:
+        eventos.append("ficou_faminto")
+    if antes["cansado"] and not depois["cansado"]:
+        eventos.append("acordou")
+    if not antes["feliz"] and depois["feliz"]:
+        eventos.append("ficou_feliz")
+    return eventos
+
+
+def deve_falar(agora, ultima_fala, eventos, ocioso_desde=None,
+               cooldown=COOLDOWN_FALA, limite_ocioso=OCIOSO_PARA_FALAR):
+    """Motivo da fala espontanea, ou None.
+
+    So dispara em transicao de estado ou silencio longo, nunca a cada turno,
+    e nunca antes do cooldown.
+    """
+    if ultima_fala is not None and agora - ultima_fala < cooldown:
+        return None
+    if eventos:
+        return eventos[0]
+    if ocioso_desde is not None and agora - ocioso_desde >= limite_ocioso:
+        return "ocioso"
+    return None
+
+
+def montar_prompt_fala(nome, personality, satiety, happiness, energy,
+                       motivo, ultima_acao=None):
+    """Prompt da fala espontanea, com personalidade, stats e ultima acao."""
+    motivos = {
+        "entrou_critico": "voce acabou de entrar em estado critico",
+        "saiu_critico": "voce acabou de sair do estado critico",
+        "ficou_faminto": "a fome acabou de apertar",
+        "acordou": "voce acabou de acordar descansado",
+        "ficou_feliz": "voce acabou de ficar muito feliz",
+        "ocioso": "faz tempo que seu dono nao interage",
+    }
+    acao = f" A ultima coisa que fizeram com voce foi: {ultima_acao}." if ultima_acao else ""
+    return (
+        f"Voce e {nome}, um bichinho virtual {personality}. "
+        f"Saciedade {satiety}/10, felicidade {happiness}/10, energia {energy}/10. "
+        f"Contexto: {motivos.get(motivo, motivo)}.{acao} "
+        f"Diga uma unica frase curta, na primeira pessoa, sobre isso."
+    )

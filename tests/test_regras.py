@@ -184,3 +184,119 @@ class TestBalanceamento:
                 assert turno < 20, "abandono deveria matar rapido"
                 return
         pytest.fail("abandono nao matou")
+
+
+class TestFalaEspontanea:
+    def _foto(self, s=6, h=6, e=6):
+        return r.instantaneo(s, h, e)
+
+    def test_sem_foto_anterior_nao_ha_transicao(self):
+        assert r.transicoes(None, self._foto()) == []
+
+    def test_estado_estavel_nao_gera_evento(self):
+        assert r.transicoes(self._foto(), self._foto()) == []
+
+    @pytest.mark.parametrize("antes,depois,evento", [
+        ((6, 6, 6), (6, 1, 6), "entrou_critico"),
+        ((6, 1, 6), (6, 6, 6), "saiu_critico"),
+        ((6, 6, 6), (2, 6, 6), "ficou_faminto"),
+        ((6, 6, 3), (6, 6, 9), "acordou"),
+        ((6, 5, 6), (6, 9, 6), "ficou_feliz"),
+    ])
+    def test_transicoes(self, antes, depois, evento):
+        assert evento in r.transicoes(self._foto(*antes), self._foto(*depois))
+
+    def test_so_dispara_em_transicao(self):
+        """Estado ruim parado nao fala de novo a cada turno."""
+        foto = self._foto(2, 2, 2)
+        assert r.deve_falar(1000, None, r.transicoes(foto, foto)) is None
+
+    def test_cooldown_bloqueia(self):
+        assert r.deve_falar(1000, 990, ["ficou_faminto"], cooldown=90) is None
+
+    def test_fala_depois_do_cooldown(self):
+        assert r.deve_falar(1100, 1000, ["ficou_faminto"], cooldown=90) == "ficou_faminto"
+
+    def test_primeira_fala_nao_espera_cooldown(self):
+        assert r.deve_falar(10, None, ["ficou_faminto"]) == "ficou_faminto"
+
+    def test_ocioso_dispara_sem_evento(self):
+        assert r.deve_falar(1000, None, [], ocioso_desde=0, limite_ocioso=300) == "ocioso"
+
+    def test_ocioso_curto_nao_dispara(self):
+        assert r.deve_falar(100, None, [], ocioso_desde=0, limite_ocioso=300) is None
+
+    def test_evento_tem_prioridade_sobre_ocioso(self):
+        assert r.deve_falar(1000, None, ["entrou_critico"], ocioso_desde=0) == "entrou_critico"
+
+    def test_critico_vem_antes_de_fome(self):
+        eventos = r.transicoes(self._foto(6, 6, 6), self._foto(1, 1, 1))
+        assert eventos[0] == "entrou_critico"
+
+    def test_prompt_carrega_contexto(self):
+        p = r.montar_prompt_fala("Kiki", "carente", 2, 9, 4, "ficou_faminto", "brincar")
+        for esperado in ["Kiki", "carente", "2/10", "9/10", "4/10", "brincar"]:
+            assert esperado in p
+
+    def test_prompt_sem_ultima_acao(self):
+        p = r.montar_prompt_fala("Kiki", "carente", 5, 5, 5, "ocioso")
+        assert "ultima coisa" not in p
+
+class TestProgressoDaCutscene:
+    """Assistir a cutscene rende um bonus; pular mantem o ganho de sempre."""
+
+    def test_sem_cutscene_e_o_padrao(self):
+        """O default nao da bonus: acoes fora de cutscene rendem o de sempre."""
+        assert r.aplicar_sleep(3, 8, "resmungão") == r.aplicar_sleep(3, 8, "resmungão", 0.0)
+
+    def test_assistir_dormir_rende_mais(self):
+        pulado = r.aplicar_sleep(0, 8, "resmungão", 0.0)[0]
+        inteiro = r.aplicar_sleep(0, 8, "resmungão", 1.0)[0]
+        assert inteiro == pulado + r.BONUS_CUTSCENE
+
+    def test_pular_dormir_nao_perde_nada(self):
+        """Pular rende exatamente o ganho ja balanceado, sem punicao."""
+        base = 5  # bonus do resmungão em aplicar_sleep
+        assert r.aplicar_sleep(0, 8, "resmungão", 0.0)[0] == base
+
+    def test_custo_de_saciedade_independe_do_progresso(self):
+        assert (r.aplicar_sleep(3, 8, "carente", 0.0)[1]
+                == r.aplicar_sleep(3, 8, "carente", 1.0)[1])
+
+    def test_assistir_brincar_rende_mais(self):
+        _, _, pulado = r.aplicar_play(0, 5, "resmungão", "ganhou", 0.0)
+        _, _, inteiro = r.aplicar_play(0, 5, "resmungão", "ganhou", 1.0)
+        assert inteiro == pulado + r.BONUS_CUTSCENE
+
+    def test_custo_de_energia_independe_do_progresso(self):
+        assert (r.aplicar_play(5, 5, "resmungão", "ganhou", 0.0)[1]
+                == r.aplicar_play(5, 5, "resmungão", "ganhou", 1.0)[1])
+
+    def test_bonus_nunca_diminui_com_mais_progresso(self):
+        ganhos = [r.aplicar_play(0, 5, "resmungão", "ganhou", p / 10)[2]
+                  for p in range(11)]
+        assert ganhos == sorted(ganhos) and ganhos[-1] > ganhos[0]
+
+    @pytest.mark.parametrize("fora,limite", [(-5.0, 0.0), (7.0, 1.0)])
+    def test_progresso_fora_da_faixa_e_preso(self, fora, limite):
+        assert (r.aplicar_sleep(0, 8, "carente", fora)
+                == r.aplicar_sleep(0, 8, "carente", limite))
+
+    def test_bonus_nao_supera_o_teto(self):
+        assert r.bonus_por_progresso(1.0) == r.BONUS_CUTSCENE
+
+    @pytest.mark.parametrize("personality", ["carente", "brincalhão", "resmungão"])
+    @pytest.mark.parametrize("progresso", [0.0, 0.5, 1.0])
+    def test_sustentavel_em_qualquer_progresso(self, personality, progresso):
+        """Pular ou assistir, cuidar do pior status sustenta o pet."""
+        s = h = e = 5
+        for _ in range(100):
+            pior = min(s, h, e)
+            if s == pior:
+                s, _ = r.aplicar_feed(s)
+            elif e == pior:
+                e, s = r.aplicar_sleep(e, s, personality, progresso)
+            else:
+                h, e, _ = r.aplicar_play(h, e, personality, "perdeu", progresso)
+            s, h, e = r.aplicar_tick(s, h, e)
+            assert r.esta_vivo(s, h, e), "o ritmo escolhido nao pode matar o pet"
