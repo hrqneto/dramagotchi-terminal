@@ -7,3 +7,5 @@ venv/
 .venv/
 CLAUDE.md
 .claude/
+*.cast
+data/

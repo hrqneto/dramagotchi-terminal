@@ -9,17 +9,21 @@ from rich.console import Console
 from collections import Counter
 
 from dramagotchi import regras
-from dramagotchi.constants import EMOJIS, FALLBACK_DIALOG
+from dramagotchi.constants import (
+    EMOJIS, FALLBACK_DIALOG, CUTSCENE_DORMIR, CUTSCENE_BRINCAR,
+)
 from rich.console import Group
 from rich.align import Align
 from rich.text import Text
 from rich.markup import escape
-from dramagotchi.utils import animate, render, minigame_jokenpo, mostrar_palco, limpar_stdin, TELA, emotion_chart, get_emotion_state, generate_prompt, get_fallback_phrase, summarize_emotions
+from dramagotchi.utils import animate, render, minigame_jokenpo, mostrar_palco, limpar_stdin, TELA, emotion_chart, get_emotion_state, generate_prompt, get_fallback_phrase, summarize_emotions, cutscene
 
 console = Console()
 load_dotenv()
 
 MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+
+SAVE_PATH = "data/save.json"
 
 
 def _get_client():
@@ -109,23 +113,27 @@ class Dramagotchi:
 
     def save(self):
         os.makedirs("data", exist_ok=True)
-        with open("data/save.json", "w") as f:
+        with open(SAVE_PATH, "w") as f:
             json.dump(self.serialize(), f)
 
     @staticmethod
+    def arquivar_save():
+        """Move o save atual para um nome datado. Devolve o caminho, ou None."""
+        if not os.path.exists(SAVE_PATH):
+            return None
+        carimbo = time.strftime("%Y%m%d-%H%M%S")
+        destino = f"{SAVE_PATH}.{carimbo}.morto"
+        os.replace(SAVE_PATH, destino)
+        return destino
+
+    @staticmethod
     def load():
-        with open("data/save.json") as f:
+        with open(SAVE_PATH) as f:
             data = json.load(f)
         # Saves antigos guardam "hunger", a escala invertida de satiety.
         if "hunger" in data and "satiety" not in data:
             data["satiety"] = 10 - data.pop("hunger")
         return Dramagotchi(data['name'], data)
-
-    def status(self, mensagem=None):
-        pendente = self.memory.pop("aviso_pendente", None)
-        if pendente:
-            mensagem = f"[bold red]{pendente}[/bold red]"
-        TELA.desenhar(render(self, None, mensagem))
 
     def emotion(self):
         return get_emotion_state(self.satiety, self.happiness, self.energy)
@@ -189,12 +197,16 @@ class Dramagotchi:
     def _final_drama(self):
         """Estado critico maximo: leva direto ao desfecho."""
         self.memory["drama_triggered"] = True
-        animate(self, "drama", delay=0.3,
+        animate(self, "drama",
                 mensagem="[bold red]😭 Você me deixou chegar no estado crítico máximo...[/bold red]")
-        time.sleep(1.0)
         self.satiety = 0
         self.happiness = 0
         self.energy = 0
+
+    def _rodar_cutscene(self, quadros):
+        """Roda uma cutscene com o nome ja interpolado. Devolve o progresso."""
+        return cutscene(self, [(pose, legenda.format(nome=escape(self.name)))
+                               for pose, legenda in quadros])
 
     def feed(self):
         self.satiety, comeu = regras.aplicar_feed(self.satiety)
@@ -212,7 +224,7 @@ class Dramagotchi:
                     mensagem=f"{escape(self.name)} está muito cansado para brincar. 😓", dim=True)
             return
 
-        animate(self, "correr", delay=0.25)
+        progresso = self._rodar_cutscene(CUTSCENE_BRINCAR)
         escolha = TELA.perguntar(
             self,
             "[bold]🎾 Pedra, papel ou tesoura?[/bold]  "
@@ -224,10 +236,9 @@ class Dramagotchi:
             return
 
         resultado, palco = minigame_jokenpo(self, escolha)
-        mostrar_palco(self, palco)
 
         self.happiness, self.energy, ganho = regras.aplicar_play(
-            self.happiness, self.energy, self.personality, resultado
+            self.happiness, self.energy, self.personality, resultado, progresso
         )
         self.memory["play"] += 1
         self.memory["ultima_acao"] = "brincar"
@@ -240,16 +251,20 @@ class Dramagotchi:
             "empate": f"Empate justo! +{ganho} 🤝",
             "perdeu": f"{escape(self.name)} ganhou e tirou sarro. +{ganho} 😜",
         }[resultado]
-        animate(self, {"ganhou": "ganhou", "empate": "play", "perdeu": "perdeu"}[resultado],
-                mensagem=msg)
+        mostrar_palco(self, palco, mensagem=msg)
+        animate(self, {"ganhou": "ganhou", "empate": "play", "perdeu": "perdeu"}[resultado])
 
     def sleep(self):
+        progresso = self._rodar_cutscene(CUTSCENE_DORMIR)
         self.energy, self.satiety = regras.aplicar_sleep(
-            self.energy, self.satiety, self.personality
+            self.energy, self.satiety, self.personality, progresso
         )
         self.memory["sleep"] += 1
         self.memory["ultima_acao"] = "dormir"
-        animate(self, "sleep", mensagem=f"{escape(self.name)} tirou um cochilo. 🛌")
+        msg = (f"{escape(self.name)} dormiu a noite toda e acordou renovado. 🛌"
+               if progresso >= 1.0
+               else f"{escape(self.name)} tirou um cochilo curto. 😪")
+        animate(self, "sleep", mensagem=msg)
 
     def idle(self):
         animate(self, "idle", dim=True)

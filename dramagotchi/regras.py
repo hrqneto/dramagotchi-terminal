@@ -10,6 +10,18 @@ MINUTOS_POR_TICK = 3
 # personalidades sem bonus de felicidade.
 GANHO_MINIGAME = {"ganhou": 7, "empate": 5, "perdeu": 4}
 
+# Bonus por assistir a cutscene inteira. E bonus, nao desconto: pular rende o
+# mesmo de sempre. Descontar abaixo do ganho normal quebra a economia -- ela
+# ja fecha com pouca folga sobre o decaimento, e quem pulasse ficaria preso
+# em comer e dormir ate a felicidade zerar.
+BONUS_CUTSCENE = 1
+
+
+def bonus_por_progresso(progresso, bonus=BONUS_CUTSCENE):
+    """Bonus proporcional a fracao da cutscene assistida."""
+    return round(bonus * max(0.0, min(1.0, progresso)))
+
+
 VENCE = {"pedra": "tesoura", "papel": "pedra", "tesoura": "papel"}
 
 
@@ -25,19 +37,29 @@ def aplicar_feed(satiety):
     return limitar(satiety + 4), True
 
 
-def aplicar_play(happiness, energy, personality, resultado):
-    """Troca energia por felicidade. Sem energia, nada muda."""
+def aplicar_play(happiness, energy, personality, resultado, progresso=0.0):
+    """Troca energia por felicidade. Sem energia, nada muda.
+
+    `progresso` e a fracao da cutscene assistida: assistir soma um bonus,
+    pular rende o ganho normal.
+    """
     if energy <= 0:
         return happiness, energy, 0
     ganho = GANHO_MINIGAME[resultado]
     if personality == "brincalhão":
         ganho += 1
+    ganho += bonus_por_progresso(progresso)
     return limitar(happiness + ganho), limitar(energy - 2), ganho
 
 
-def aplicar_sleep(energy, satiety, personality):
-    """Recupera energia ao custo de saciedade. Devolve (energia, saciedade)."""
+def aplicar_sleep(energy, satiety, personality, progresso=0.0):
+    """Recupera energia ao custo de saciedade. Devolve (energia, saciedade).
+
+    `progresso` e a fracao da cutscene assistida: o sono inteiro rende um
+    bonus; o custo de saciedade nao muda.
+    """
     bonus = 6 if personality == "carente" else 5
+    bonus += bonus_por_progresso(progresso)
     return limitar(energy + bonus), limitar(satiety - 2)
 
 

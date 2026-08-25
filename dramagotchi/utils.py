@@ -238,6 +238,51 @@ class Tela:
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
 
+    def perguntar_livre(self, prompt):
+        """Pergunta sem pet na tela — usada antes de existir um bichinho."""
+        if self.live is None or not sys.stdin.isatty():
+            limpar_stdin()
+            try:
+                return input(f"{prompt} ").strip()
+            except EOFError:
+                return ""
+
+        import termios, tty as _tty
+
+        buf = ""
+        fd = sys.stdin.fileno()
+        antigo = termios.tcgetattr(fd)
+        try:
+            _tty.setcbreak(fd)
+            termios.tcflush(fd, termios.TCIFLUSH)
+            while True:
+                self.desenhar(Align.center(
+                    Panel(Text.from_markup(f"{prompt}\n > {escape(buf)}"),
+                          border_style="blue", padding=(1, 2)),
+                    vertical="middle",
+                ))
+                try:
+                    b = os.read(fd, 1)
+                except OSError:
+                    return buf.strip()
+                if not b:
+                    return buf.strip()
+                ch = b.decode("utf-8", "ignore")
+                if not ch:
+                    continue
+                if ch in ("\r", "\n"):
+                    return buf.strip()
+                if ch in ("\x7f", "\b"):
+                    buf = buf[:-1]
+                elif ch == "\x03":
+                    raise KeyboardInterrupt
+                elif ch == "\x1b":
+                    continue
+                elif ch.isprintable():
+                    buf += ch
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
+
     def perguntar(self, pet, prompt, mensagem=None, echo=True):
         """Mostra o quadro com o prompt no rodape e le a resposta."""
         if self.live is None or not sys.stdin.isatty():
@@ -253,16 +298,94 @@ class Tela:
 TELA = Tela()
 
 
-def animate(pet, chave, delay=0.35, mensagem=None, dim=False, palco=None):
+DICA_CONTINUAR = "[dim]▸ tecla para continuar[/dim]"
+
+DELAY_QUADRO = 0.2
+
+
+def _pode_esperar_tecla():
+    """So da para bloquear em tecla dentro de um tty com a Live no ar."""
+    return sys.stdin.isatty() and TELA.live is not None
+
+
+PULAR = ("\x1b", "q", "Q")
+
+
+def esperar_tecla():
+    """Bloqueia ate uma tecla e devolve ela. Fora de um tty, nao espera nada."""
+    if not _pode_esperar_tecla():
+        return None
+    import termios, tty as _tty
+
+    fd = sys.stdin.fileno()
+    antigo = termios.tcgetattr(fd)
+    try:
+        _tty.setcbreak(fd)
+        termios.tcflush(fd, termios.TCIFLUSH)
+        while True:
+            b = os.read(fd, 1)
+            if not b:
+                return None
+            ch = b.decode("utf-8", "ignore")
+            if ch == "\x03":
+                raise KeyboardInterrupt
+            if ch:
+                return ch
+    except OSError:
+        return None
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
+
+
+def mostrar_texto(pet, mensagem=None, pose=None, dim=False, palco=None):
+    """Porta unica de todo texto que o jogador precisa ler.
+
+    Regra do jogo: quadro de animacao avanca sozinho, texto so sai com
+    tecla. Toda mensagem, legenda, fala ou palco com texto passa por aqui —
+    e por isso que nenhum caso novo escapa da pausa.
+    """
+    if mensagem is None and palco is None:
+        return
+    corpo = f"{mensagem}\n{DICA_CONTINUAR}" if mensagem else DICA_CONTINUAR
+    TELA.desenhar(render(pet, pose, corpo, dim, palco))
+    esperar_tecla()
+
+
+def animate(pet, chave, delay=DELAY_QUADRO, mensagem=None, dim=False, palco=None):
     """Anima o boneco no lugar; a mensagem so entra no ultimo frame."""
     poses = ANIMACOES.get(chave, ["ocioso"])
     for pose in poses:
         TELA.desenhar(render(pet, pose, None, dim, palco))
         time.sleep(delay)
-    TELA.desenhar(render(pet, None, mensagem, dim, palco))
     if mensagem:
-        time.sleep(0.9)
+        mostrar_texto(pet, mensagem, dim=dim, palco=palco)
+    else:
+        TELA.desenhar(render(pet, None, None, dim, palco))
 
+
+def cutscene(pet, quadros, delay=DELAY_QUADRO):
+    """Roda uma cutscene narrada. Devolve a fracao de quadros lidos.
+
+    Cada quadro e (pose, legenda) e a legenda e narracao: espera tecla,
+    como todo texto. ESC (ou 'q') pula o resto; o retorno alimenta o ganho
+    da acao, entao pular custa recompensa, nao a acao.
+    """
+    if not quadros:
+        return 1.0
+
+    total = len(quadros)
+    if not _pode_esperar_tecla():
+        for pose, legenda in quadros:
+            TELA.desenhar(render(pet, pose, legenda))
+            time.sleep(delay)
+        return 1.0
+
+    dica = f"{DICA_CONTINUAR}[dim]   ·   {escape('[esc]')} pular[/dim]"
+    for i, (pose, legenda) in enumerate(quadros):
+        TELA.desenhar(render(pet, pose, f"{legenda}\n{dica}"))
+        if esperar_tecla() in PULAR:
+            return i / total
+    return 1.0
 
 def emotion_chart(emotions, name):
     """Gera o PNG e devolve o caminho, ou None se nao houver dados."""
@@ -291,13 +414,41 @@ def generate_prompt(name, personality, estado, history):
 def get_fallback_phrase(personality):
     return random.choice(FALLBACK_DIALOG.get(personality, ["Hoje tá difícil 😔"]))
 
-def summarize_emotions(name, memory):
-    emocoes = Counter(memory["emotions"])
-    mais_sentidas = ", ".join([f"{e}" for e, _ in emocoes.most_common(2)])
-    console.print(f"\n[red bold]⚰️ Últimos momentos de {name}:[/red bold]", highlight=False)
-    console.print(f"- Emoções mais sentidas: {mais_sentidas}")
-    console.print(f"- Brincou {memory['play']}x, Dormiu {memory['sleep']}x, Foi alimentado {memory['feed']}x")
+def _linhas_do_desfecho(name, memory):
+    emocoes = Counter(memory.get("emotions", []))
+    mais_sentidas = ", ".join(e for e, _ in emocoes.most_common(2)) or "nenhuma registrada"
+    return [
+        f"[red bold]⚰️ Últimos momentos de {escape(name)}[/red bold]",
+        "",
+        f"Emoções mais sentidas: {mais_sentidas}",
+        (f"Brincou {memory.get('play', 0)}x, dormiu {memory.get('sleep', 0)}x, "
+         f"foi alimentado {memory.get('feed', 0)}x"),
+    ]
 
+
+def summarize_emotions(name, memory):
+    for linha in _linhas_do_desfecho(name, memory):
+        console.print(linha, highlight=False)
+
+
+def palco_do_desfecho(name, memory):
+    """Painel do desfecho, para ocupar o palco dentro da Live."""
+    return Group(*[Align.center(Text.from_markup(l))
+                   for l in _linhas_do_desfecho(name, memory)])
+
+
+def mostrar_desfecho(pet):
+    """Mostra o desfecho no palco e segura ate uma tecla.
+
+    Fora da Live nao ha palco: cai no print simples.
+    """
+    if TELA.live is None:
+        summarize_emotions(pet.name, pet.memory)
+        return
+    mostrar_texto(pet, pose="chorando", palco=palco_do_desfecho(pet.name, pet.memory))
+
+
+JOKENPO_OCULTO = " _____\n|     |\n|  ?  |\n|_____|"
 
 JOKENPO = {
     "pedra":   " _____\n(     )\n( PEDRA )\n(_____)",
@@ -306,31 +457,55 @@ JOKENPO = {
 }
 
 
+def _palco_jokenpo(pet, escolha_jogador, escolha_pet=None, titulo=None):
+    """Mesa do jokenpo. Sem `escolha_pet` a mao do bicho fica escondida."""
+    mao_pet = JOKENPO[escolha_pet] if escolha_pet else JOKENPO_OCULTO
+    linhas = [
+        Align.center(Text.from_markup(
+            f"[bold]Você[/bold]        [bold]{escape(pet.name)}[/bold]")),
+        Align.center(Text("")),
+        Align.center(Columns(
+            [Text(JOKENPO[escolha_jogador]), Text("   vs   "), Text(mao_pet)],
+            padding=(0, 2),
+        )),
+    ]
+    if titulo:
+        linhas += [Align.center(Text("")),
+                   Align.center(Text.from_markup(titulo))]
+    return Group(*linhas)
+
+
+TITULO_JOKENPO = {
+    "ganhou": "[bold green]Você venceu! 🎉[/bold green]",
+    "perdeu": "[bold red]{nome} venceu! 😜[/bold red]",
+    "empate": "[bold yellow]Empate! 🤝[/bold yellow]",
+}
+
+
 def minigame_jokenpo(pet, escolha_jogador):
-    """Pedra-papel-tesoura no palco. Devolve (resultado, painel_do_palco)."""
+    """Pedra-papel-tesoura em tres tempos, cada um esperando tecla.
+
+    Escolha, revelacao e resultado sao beats separados de proposito: numa
+    tela so, o placar aparece junto com as maos e estraga a revelacao.
+    """
     escolha_pet = random.choice(list(JOKENPO))
     resultado = regras.jogar_jokenpo(escolha_jogador, escolha_pet)
 
-    titulo = {
-        "ganhou": "[bold green]Você venceu! 🎉[/bold green]",
-        "perdeu": f"[bold red]{pet.name} venceu! 😜[/bold red]",
-        "empate": "[bold yellow]Empate! 🤝[/bold yellow]",
-    }[resultado]
-
-    palco = Group(
-        Align.center(Text.from_markup(f"[bold]Você[/bold]        [bold]{pet.name}[/bold]")),
-        Align.center(Text("")),
-        Align.center(Columns(
-            [Text(JOKENPO[escolha_jogador]), Text("   vs   "), Text(JOKENPO[escolha_pet])],
-            padding=(0, 2),
-        )),
-        Align.center(Text("")),
-        Align.center(Text.from_markup(titulo)),
-    )
-    return resultado, palco
+    # 1. a escolha do jogador entra na mesa, a do bicho ainda escondida
+    mostrar_texto(pet, f"[dim]Você jogou {escolha_jogador}. E {escape(pet.name)}...?[/dim]",
+                  palco=_palco_jokenpo(pet, escolha_jogador))
+    # 2. a revelacao, ainda sem veredito
+    mostrar_texto(pet, f"[bold]{escape(pet.name)} jogou {escolha_pet}![/bold]",
+                  palco=_palco_jokenpo(pet, escolha_jogador, escolha_pet))
+    # 3. o resultado
+    titulo = TITULO_JOKENPO[resultado].format(nome=escape(pet.name))
+    return resultado, _palco_jokenpo(pet, escolha_jogador, escolha_pet, titulo)
 
 
-def mostrar_palco(pet, palco, segundos=1.8):
-    """Desenha um palco customizado e segura na tela."""
-    TELA.desenhar(render(pet, palco=palco))
-    time.sleep(segundos)
+def mostrar_palco(pet, palco, mensagem=None, segundos=1.8):
+    """Palco customizado que espera tecla. `segundos` so vale fora de um tty."""
+    if _pode_esperar_tecla():
+        mostrar_texto(pet, mensagem, palco=palco)
+    else:
+        TELA.desenhar(render(pet, mensagem=mensagem, palco=palco))
+        time.sleep(segundos)

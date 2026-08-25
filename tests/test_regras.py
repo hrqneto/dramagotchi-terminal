@@ -241,3 +241,62 @@ class TestFalaEspontanea:
     def test_prompt_sem_ultima_acao(self):
         p = r.montar_prompt_fala("Kiki", "carente", 5, 5, 5, "ocioso")
         assert "ultima coisa" not in p
+
+class TestProgressoDaCutscene:
+    """Assistir a cutscene rende um bonus; pular mantem o ganho de sempre."""
+
+    def test_sem_cutscene_e_o_padrao(self):
+        """O default nao da bonus: acoes fora de cutscene rendem o de sempre."""
+        assert r.aplicar_sleep(3, 8, "resmungão") == r.aplicar_sleep(3, 8, "resmungão", 0.0)
+
+    def test_assistir_dormir_rende_mais(self):
+        pulado = r.aplicar_sleep(0, 8, "resmungão", 0.0)[0]
+        inteiro = r.aplicar_sleep(0, 8, "resmungão", 1.0)[0]
+        assert inteiro == pulado + r.BONUS_CUTSCENE
+
+    def test_pular_dormir_nao_perde_nada(self):
+        """Pular rende exatamente o ganho ja balanceado, sem punicao."""
+        base = 5  # bonus do resmungão em aplicar_sleep
+        assert r.aplicar_sleep(0, 8, "resmungão", 0.0)[0] == base
+
+    def test_custo_de_saciedade_independe_do_progresso(self):
+        assert (r.aplicar_sleep(3, 8, "carente", 0.0)[1]
+                == r.aplicar_sleep(3, 8, "carente", 1.0)[1])
+
+    def test_assistir_brincar_rende_mais(self):
+        _, _, pulado = r.aplicar_play(0, 5, "resmungão", "ganhou", 0.0)
+        _, _, inteiro = r.aplicar_play(0, 5, "resmungão", "ganhou", 1.0)
+        assert inteiro == pulado + r.BONUS_CUTSCENE
+
+    def test_custo_de_energia_independe_do_progresso(self):
+        assert (r.aplicar_play(5, 5, "resmungão", "ganhou", 0.0)[1]
+                == r.aplicar_play(5, 5, "resmungão", "ganhou", 1.0)[1])
+
+    def test_bonus_nunca_diminui_com_mais_progresso(self):
+        ganhos = [r.aplicar_play(0, 5, "resmungão", "ganhou", p / 10)[2]
+                  for p in range(11)]
+        assert ganhos == sorted(ganhos) and ganhos[-1] > ganhos[0]
+
+    @pytest.mark.parametrize("fora,limite", [(-5.0, 0.0), (7.0, 1.0)])
+    def test_progresso_fora_da_faixa_e_preso(self, fora, limite):
+        assert (r.aplicar_sleep(0, 8, "carente", fora)
+                == r.aplicar_sleep(0, 8, "carente", limite))
+
+    def test_bonus_nao_supera_o_teto(self):
+        assert r.bonus_por_progresso(1.0) == r.BONUS_CUTSCENE
+
+    @pytest.mark.parametrize("personality", ["carente", "brincalhão", "resmungão"])
+    @pytest.mark.parametrize("progresso", [0.0, 0.5, 1.0])
+    def test_sustentavel_em_qualquer_progresso(self, personality, progresso):
+        """Pular ou assistir, cuidar do pior status sustenta o pet."""
+        s = h = e = 5
+        for _ in range(100):
+            pior = min(s, h, e)
+            if s == pior:
+                s, _ = r.aplicar_feed(s)
+            elif e == pior:
+                e, s = r.aplicar_sleep(e, s, personality, progresso)
+            else:
+                h, e, _ = r.aplicar_play(h, e, personality, "perdeu", progresso)
+            s, h, e = r.aplicar_tick(s, h, e)
+            assert r.esta_vivo(s, h, e), "o ritmo escolhido nao pode matar o pet"
