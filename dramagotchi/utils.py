@@ -59,6 +59,7 @@ OPCOES = [
     "[bold]4[/bold] Gráfico 📊",
     "[bold]5[/bold] Sair ❌",
     "[bold]6[/bold] Conversar 💬",
+    "[bold]7[/bold] Recomeçar 🔄",
 ]
 
 LARGURA_MIN, ALTURA_MIN = 72, 20
@@ -123,26 +124,49 @@ def _painel_menu(prompt=None):
     return Panel(Group(*linhas), border_style="blue", padding=(0, 1))
 
 
-def render(pet, pose=None, mensagem=None, dim=False, palco=None, prompt=None):
-    """Monta a tela inteira. `palco` substitui o boneco durante um minigame."""
+def _altura_painel(painel, largura=None):
+    """Quantas linhas o painel ocupa na largura atual do console."""
+    largura = largura or console.size.width
+    linhas = console.render_lines(painel, console.options.update_width(largura))
+    return len(linhas)
+
+
+def render(pet, pose=None, mensagem=None, dim=False, palco=None, prompt=None,
+           so_palco=False):
+    """Monta a tela inteira. `palco` substitui o boneco durante um minigame.
+
+    `so_palco` tira lateral e menu: no desfecho as barras zeradas e a fala de
+    fome contradizem o texto de morte.
+    """
     if pose is None and not dim:
         pose = pose_do_humor(pet)
     arte = POSES.get(pose, PET_ASCII) if pose else PET_ASCII
     estilo = "dim" if dim else "bold magenta"
 
     layout = Layout()
-    layout.split_column(
-        Layout(name="corpo", ratio=1),
-        Layout(name="rodape", size=5),
-    )
-    layout["corpo"].split_row(
-        Layout(name="palco", ratio=3),
-        Layout(name="lateral", size=24),
-    )
-    layout["lateral"].split_column(
-        Layout(name="humor", size=3),
-        Layout(name="status", ratio=1),
-    )
+    if so_palco:
+        # Rodape cresce com o prompt: a linha de digitacao nao pode ser cortada.
+        linhas_rodape = 2 + len((prompt or "").split("\n"))
+        layout.split_column(
+            Layout(name="palco", ratio=1),
+            Layout(name="rodape", size=linhas_rodape),
+        )
+    else:
+        # O menu quebra em 2 linhas em terminal estreito; medir evita cortar
+        # a linha de digitacao logo abaixo dele.
+        rodape = _painel_menu(prompt)
+        layout.split_column(
+            Layout(name="corpo", ratio=1),
+            Layout(name="rodape", size=_altura_painel(rodape)),
+        )
+        layout["corpo"].split_row(
+            Layout(name="palco", ratio=3),
+            Layout(name="lateral", size=24),
+        )
+        layout["lateral"].split_column(
+            Layout(name="humor", size=3),
+            Layout(name="status", ratio=1),
+        )
 
     centro = palco if palco is not None else Text(arte, style=estilo)
     aviso = Text.from_markup(mensagem) if mensagem else Text("")
@@ -156,12 +180,18 @@ def render(pet, pose=None, mensagem=None, dim=False, palco=None, prompt=None):
             padding=(0, 1),
         )
     )
-    layout["humor"].update(
-        Panel(Text.from_markup(sparkline(pet.memory.get("emotions", []))),
-              title="[bold]Humor[/bold]", border_style="magenta", padding=(0, 1))
-    )
-    layout["status"].update(_painel_status(pet))
-    layout["rodape"].update(_painel_menu(prompt))
+    if not so_palco:
+        layout["humor"].update(
+            Panel(Text.from_markup(sparkline(pet.memory.get("emotions", []))),
+                  title="[bold]Humor[/bold]", border_style="magenta", padding=(0, 1))
+        )
+        layout["status"].update(_painel_status(pet))
+        layout["rodape"].update(rodape)
+    else:
+        # Sem menu: so o prompt, para o desfecho poder perguntar algo.
+        layout["rodape"].update(
+            Panel(Text.from_markup(prompt or ""), border_style="blue", padding=(0, 1))
+        )
     return layout
 
 
@@ -196,7 +226,19 @@ class Tela:
         else:
             self.live.update(renderable, refresh=True)
 
-    def _ler_linha(self, pet, prompt, mensagem, echo):
+    def _ler_uma_tecla(self, pet, prompt, mensagem, so_palco=False):
+        """Le UMA tecla e devolve ela, sem esperar enter.
+
+        Numa pergunta de uma letra (s/n) nenhuma tecla pode ser especial:
+        ESC aqui era engolido pelo leitor de linha e a pergunta nunca
+        resolvia, deixando o jogador preso na tela de desfecho.
+        """
+        self.desenhar(render(pet, mensagem=mensagem, prompt=prompt,
+                             so_palco=so_palco))
+        ch = esperar_tecla()
+        return "" if ch is None else ch.strip()
+
+    def _ler_linha(self, pet, prompt, mensagem, echo, so_palco=False):
         """Le uma linha tecla a tecla, sem parar o Live.
 
         Parar a Live para usar input() sai e reentra no buffer alternativo
@@ -212,7 +254,7 @@ class Tela:
             termios.tcflush(fd, termios.TCIFLUSH)
             while True:
                 self.desenhar(render(
-                    pet, mensagem=mensagem,
+                    pet, mensagem=mensagem, so_palco=so_palco,
                     prompt=f"{prompt}\n > {escape(buf) if echo else '*' * len(buf)}",
                 ))
                 # sys.stdin.read(1) bufferiza e nao retorna tecla a tecla.
@@ -283,16 +325,25 @@ class Tela:
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
 
-    def perguntar(self, pet, prompt, mensagem=None, echo=True):
-        """Mostra o quadro com o prompt no rodape e le a resposta."""
+    def perguntar(self, pet, prompt, mensagem=None, echo=True, so_palco=False,
+                  tecla_unica=False):
+        """Mostra o quadro com o prompt no rodape e le a resposta.
+
+        `tecla_unica` responde na primeira tecla, sem enter — para perguntas
+        de uma letra, onde esperar uma linha inteira so cria formas de
+        travar.
+        """
         if self.live is None or not sys.stdin.isatty():
-            self.desenhar(render(pet, mensagem=mensagem, prompt=prompt))
+            self.desenhar(render(pet, mensagem=mensagem, prompt=prompt,
+                                 so_palco=so_palco))
             limpar_stdin()
             try:
                 return input(" > ").strip()
             except EOFError:
                 return ""
-        return self._ler_linha(pet, prompt, mensagem, echo)
+        if tecla_unica:
+            return self._ler_uma_tecla(pet, prompt, mensagem, so_palco)
+        return self._ler_linha(pet, prompt, mensagem, echo, so_palco)
 
 
 TELA = Tela()
@@ -337,7 +388,8 @@ def esperar_tecla():
         termios.tcsetattr(fd, termios.TCSADRAIN, antigo)
 
 
-def mostrar_texto(pet, mensagem=None, pose=None, dim=False, palco=None):
+def mostrar_texto(pet, mensagem=None, pose=None, dim=False, palco=None,
+                  so_palco=False):
     """Porta unica de todo texto que o jogador precisa ler.
 
     Regra do jogo: quadro de animacao avanca sozinho, texto so sai com
@@ -347,7 +399,7 @@ def mostrar_texto(pet, mensagem=None, pose=None, dim=False, palco=None):
     if mensagem is None and palco is None:
         return
     corpo = f"{mensagem}\n{DICA_CONTINUAR}" if mensagem else DICA_CONTINUAR
-    TELA.desenhar(render(pet, pose, corpo, dim, palco))
+    TELA.desenhar(render(pet, pose, corpo, dim, palco, so_palco=so_palco))
     esperar_tecla()
 
 
@@ -445,7 +497,8 @@ def mostrar_desfecho(pet):
     if TELA.live is None:
         summarize_emotions(pet.name, pet.memory)
         return
-    mostrar_texto(pet, pose="chorando", palco=palco_do_desfecho(pet.name, pet.memory))
+    mostrar_texto(pet, pose="chorando", palco=palco_do_desfecho(pet.name, pet.memory),
+                  so_palco=True)
 
 
 JOKENPO_OCULTO = " _____\n|     |\n|  ?  |\n|_____|"

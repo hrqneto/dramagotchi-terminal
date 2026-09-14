@@ -62,6 +62,22 @@ def _ask(prompt):
     except (OpenAIError, OSError):
         return None
 
+
+def aquecer_modelo():
+    """Dispara uma chamada descartavel para o modelo carregar na RAM.
+
+    A primeira chamada a um modelo local leva ~15s (carga), acima do timeout
+    de 8s — sem isso toda primeira fala espontanea cai no fallback.
+    """
+    def alvo():
+        try:
+            _ask("oi")
+        except Exception:
+            pass   # e so aquecimento: falha aqui nao pode vazar para o jogo
+
+    threading.Thread(target=alvo, daemon=True).start()
+
+
 def _ask_async(prompt, espera):
     """Resposta do modelo dentro de `espera` segundos, ou None.
 
@@ -117,12 +133,15 @@ class Dramagotchi:
             json.dump(self.serialize(), f)
 
     @staticmethod
-    def arquivar_save():
-        """Move o save atual para um nome datado. Devolve o caminho, ou None."""
+    def arquivar_save(sufixo="morto"):
+        """Move o save atual para um nome datado. Devolve o caminho, ou None.
+
+        O sufixo separa quem morreu de quem foi trocado no reset.
+        """
         if not os.path.exists(SAVE_PATH):
             return None
         carimbo = time.strftime("%Y%m%d-%H%M%S")
-        destino = f"{SAVE_PATH}.{carimbo}.morto"
+        destino = f"{SAVE_PATH}.{carimbo}.{sufixo}"
         os.replace(SAVE_PATH, destino)
         return destino
 

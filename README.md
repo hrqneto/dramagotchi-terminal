@@ -44,6 +44,11 @@ source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+To run the tests as well, also install the dev dependencies:
+```bash
+pip install -r requirements-dev.txt
+```
+
 ## ⚙️ Configuration
 
 Dialogue is optional — **without any configuration the game runs fine**, falling back to canned lines. To enable AI conversations, create a `.env` file in the project root:
@@ -128,7 +133,7 @@ Check your pet's emotional stats anytime:
 The game rules (actions, decay, state transitions) live in `dramagotchi/regras.py` as pure functions, covered by pytest. The input/render layer is validated by playing.
 
 ```bash
-pip install pytest
+pip install -r requirements-dev.txt
 pytest tests/ -q
 ```
 
